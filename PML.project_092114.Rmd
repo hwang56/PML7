@@ -1,0 +1,148 @@
+
+title: Practical Machine Learning Project
+=========================================
+
+```{r setoptions, echo=FALSE}
+library(knitr)
+opts_chunk$set(warnings=FALSE, message=FALSE)
+```
+
+##Downloading the data  
+```{r}
+setwd("C:\\Users\\hang\\Desktop\\Coursera_5Top\\PracticalMachineLearning\\Project\\") 
+if(!file.exists("data")){
+	dir.create("data")
+}
+##downloading "training" data  
+fileURL<-"http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv" ## replace "https" to "http" then worked!
+download.file(fileURL, destfile="./data/training.csv")
+dateDownloaded<-date()
+dateDownloaded
+
+##downloading "testing" data  
+fileURL<-"http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv" ## replace "https" to "http" then worked!
+download.file(fileURL, destfile="./data/testing.csv")
+dateDownloaded<-date()
+dateDownloaded
+```
+
+##Loading the "training" and "testing" data.     
+
+```{r, results="hide"}
+# The "training" data which is named as "d".
+d<-read.csv("./data/training.csv", header=TRUE)
+dim(d)
+str(d) # 19622 obs. of 160 vars
+#summary(d) # the last var "classe" is outcome to be predicted.
+
+# The "testing" data which is named as "d2".
+d2<-read.csv("./data/testing.csv", header=TRUE)
+dim(d2)
+#str(d2) # 20 obs. of 160 vars
+#summary(d2) # the last var "classe" is outcome to be predicted.
+```
+
+##Cleaning & Exploring Data  
+I noticed that there are many variables that contain a large number of NAs, several variables have value "DIV/0!". To review the data in details, I used Hmisc package and options() function.  
+```{r, results="asis"}
+# NA details
+library(Hmisc) 
+options(na.action="na.keep", na.detail.response=TRUE)
+# review the dataframe "d".
+a<-describe(d)
+a[1:20]
+# can review more contents of a.
+```
+
+To remove the variables with a large number of NAs, I first created a function to identify the indices for the variables with NAs. 
+The variables containing NAs, "#DIV/0!" and empty cells should be removed. In addition, the first 6 column variables which are not dirrectly corresponding to the exercise manner would also be removed. Total 54 of variables were remained in the data frame.    
+```{r}
+d_na.rm<-d
+d_na.rm<-d_na.rm[,-c(1:6, 12:16, 17:19, 21, 22, 24, 25, 26, 27, 28:30, 31:36, 50:59, 
+		69:74, 75:80, 81:83, 87, 90, 92,93, 94, 96, 97, 99, 100, 101, 103:112, 
+		125, 126, 128, 129, 131, 132, 133, 	134, 135, 136, 137, 138, 139,141:150, 89, 127, 130, 20, 23, 88, 91, 95, 98)]   
+dim(d_na.rm) 
+```
+
+
+##Splitting the Data  
+```{r}
+library(caret)
+set.seed(33833)
+inTrain<-createDataPartition(d_na.rm$classe, p=3/4, list=FALSE) 
+training<-d_na.rm[inTrain,]
+testing<-d_na.rm[-inTrain,]
+```
+
+##Plotting Predictors    
+I used 'car' package to make scatter plot on outcome variable "classe" with multiple pairs of predictors. Here shows an example, the plot shows relationship of "classe" with a few predictors on "belt" which suggested some potentials for good predictors.    
+```{r, results="asis"}
+library(car)
+scatterplotMatrix(~classe+roll_belt+pitch_belt+yaw_belt+total_accel_belt, span=0.7, data=training) 
+dev.copy(png, file="belt.scatterplot.pairs_1.png")
+dev.off()
+```
+
+##PreProcess using the caret package  
+After cleaning the data, there are 54 variables remained. However, some of those variables may be correlated. I used principle componenent analysis to preProcess the data. The results showed that 26 componenets can capture 95% of the variance.  
+```{r}
+preProc<-preProcess(training[,-54], method="pca") #26 components to capture 95% of the variance.
+preProc
+trainPC<-predict(preProc, training[,-54]) 
+```
+
+##To train the model using the pre-processed training data.  
+The varImp() function shows the most important predictors in the fitted model.    
+I chose the random-forest approach which uses bootstrapping re-sampling, and at each split, bootstrpping variables to grow multiple trees to vote, therefore increases the accuracy.   
+```{r} 
+set.seed(125) 
+modelFit<-train(training$classe~., method="rf", data=trainPC)
+varImp(modelFit)
+```
+
+##Cross validation.
+For cross-validation, pre-processing the splitted testing data using the same parameters and method used on the training data. Then make a prediction on the pre-processed testing data and compute the expected out of sample errors. The result shows that the accuracy is 98.2% which is high.
+```{r}
+testPC<-predict(preProc, testing[,-54]) 
+confusionMatrix(testing$classe, predict(modelFit, testPC)) 
+```
+
+##Fit the model without PCA pre-process.
+I also fit the model using the random-forest approach on the training data without PCA preprocess to compare the two approached with or without PCA.  
+The result shows that without PCA preprocess, the accuracy is 99.7%, only slightly increases. This suggested that PCA approach can capture the majority of the variance and is effective in this study.  
+```{r}
+modelFit2<-train(training$classe~., method="rf", ntree=20, data=training)
+varImp(modelFit2)
+confusionMatrix(testing$classe, predict(modelFit2, testing)) 
+predict(modelFit2, d2_na.rm)
+```
+
+##To predict newdata, the testing data (named "d2") from the assignment.  
+To clean the new testing data, I changed the variable name to exactly the same as the training data, which only replace "problem_id" with "classe".  
+And change the type of variable "classe" into factor variable with 5 levels. Furthermore, remove the variables in the same way as in the training data.  
+Make a prediction using the two trained models used in above,"modelFit" and "modelFit2" which agrees with each other.  
+
+```{r}
+names(d2[,-160])==names(d[,-160]) # all TRUE
+names(d2)=names(d) 
+
+d2_na.rm<-d2
+d2_na.rm<-d2_na.rm[,-c(1:6, 12:16, 17:19, 21, 22, 24, 25, 26, 27, 28:30, 31:36, 50:59, 
+		69:74, 75:80, 81:83, 87, 90, 92,93, 94, 96, 97, 99, 100, 101, 103:112, 
+		125, 126, 128, 129, 131, 132, 133, 	134, 135, 136, 137, 138, 139,141:150, 89, 127, 130, 20, 23, 88, 91, 95, 98)]   
+d2_na.rm$classe<-rep(c("A","B","C","D","E"),4)
+d2_na.rm$classe<-as.factor(d2_na.rm$classe)
+
+test2PC<-predict(preProc, d2_na.rm[,-54])	
+
+#predict using the first model (PCA pre-process)
+predict(modelFit, test2PC)
+
+#predict using the second model (without PCA pre-process)
+predict(modelFit2, d2_na.rm)
+```
+
+
+
+
+
